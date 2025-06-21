@@ -1,0 +1,280 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>Text Encoder / Decoder</title>
+<style>
+  body {
+    font-family: Arial, sans-serif;
+    padding: 20px;
+    max-width: 700px;
+    margin: auto;
+    background-color: #121212;
+    color: #eee;
+    transition: background-color 0.3s, color 0.3s;
+  }
+  h1 {
+    text-align: center;
+  }
+  .mode-switch {
+    display: flex;
+    align-items: center;
+    margin-bottom: 15px;
+  }
+  button {
+    padding: 10px 20px;
+    font-size: 1em;
+    cursor: pointer;
+    background-color: #333;
+    color: #eee;
+    border: none;
+    border-radius: 4px;
+    transition: background-color 0.3s;
+  }
+  button:hover {
+    background-color: #555;
+  }
+  textarea, select {
+    width: 100%;
+    padding: 10px;
+    margin: 10px 0;
+    font-size: 1em;
+    border-radius: 4px;
+    border: 1px solid #555;
+    background-color: #222;
+    color: #eee;
+  }
+  #result-container {
+    margin-top: 10px;
+  }
+  #result {
+    width: 100%;
+    padding: 10px;
+    background-color: #222;
+    border: 1px solid #555;
+    font-family: monospace;
+    overflow-wrap: break-word;
+    min-height: 60px;
+    border-radius: 4px;
+    user-select: text;
+  }
+  #error-message {
+    color: #f66;
+    font-weight: bold;
+    margin-top: 5px;
+  }
+  #char-count {
+    font-size: 0.9em;
+    color: #999;
+    text-align: right;
+  }
+</style>
+</head>
+<body>
+<h1>Text Encoder / Decoder</h1>
+
+<div class="mode-switch">
+  <button id="mode-toggle">Switch to Decode Mode</button>
+  <span id="mode-label" style="margin-left: 10px; font-weight: bold;">Encoding Mode</span>
+</div>
+
+<textarea id="input" rows="5" placeholder="Type or paste text here... (max 2000 characters)" maxlength="2000"></textarea>
+<div id="char-count">0 / 2000 characters</div>
+
+<select id="cipher">
+  <option value="base64">Base64</option>
+  <option value="rot13">ROT13</option>
+  <option value="hex">Hexadecimal</option>
+  <option value="binary">Binary</option>
+  <option value="morse">Morse Code</option>
+</select>
+
+<div id="result-container">
+  <div id="result" tabindex="0" aria-live="polite">Result will appear here</div>
+</div>
+<div id="error-message" role="alert" aria-live="assertive"></div>
+
+<script>
+  let encodeMode = true;
+
+  const morseMap = {
+    A: ".-", B: "-...", C: "-.-.", D: "-..",
+    E: ".", F: "..-.", G: "--.", H: "....",
+    I: "..", J: ".---", K: "-.-", L: ".-..",
+    M: "--", N: "-.", O: "---", P: ".--.",
+    Q: "--.-", R: ".-.", S: "...", T: "-",
+    U: "..-", V: "...-", W: ".--", X: "-..-",
+    Y: "-.--", Z: "--..",
+    0: "-----", 1: ".----", 2: "..---", 3: "...--",
+    4: "....-", 5: ".....", 6: "-....", 7: "--...",
+    8: "---..", 9: "----."
+  };
+
+  const inputEl = document.getElementById('input');
+  const resultEl = document.getElementById('result');
+  const cipherEl = document.getElementById('cipher');
+  const modeToggle = document.getElementById('mode-toggle');
+  const modeLabel = document.getElementById('mode-label');
+  const errorMessage = document.getElementById('error-message');
+  const charCount = document.getElementById('char-count');
+
+  inputEl.addEventListener('input', () => {
+    charCount.textContent = `${inputEl.value.length} / 2000 characters`;
+    updateResult();
+  });
+
+  cipherEl.addEventListener('change', updateResult);
+
+  modeToggle.addEventListener('click', () => {
+    encodeMode = !encodeMode;
+    modeToggle.textContent = encodeMode ? 'Switch to Decode Mode' : 'Switch to Encode Mode';
+    modeLabel.textContent = encodeMode ? 'Encoding Mode' : 'Decoding Mode';
+    errorMessage.textContent = '';
+    updateResult();
+  });
+
+  function tryDecodeAuto(text) {
+    try {
+      if (/^[A-Za-z0-9+/=\s]+$/.test(text.trim())) {
+        let decoded = atob(text.trim());
+        if (/^[\x20-\x7E\s]*$/.test(decoded)) return decoded;
+      }
+    } catch {}
+    try {
+      let parts = text.trim().split(/\s+/);
+      if (parts.every(p => /^[0-9a-fA-F]{2}$/.test(p))) {
+        return parts.map(h => String.fromCharCode(parseInt(h,16))).join('');
+      }
+    } catch {}
+    try {
+      let parts = text.trim().split(/\s+/);
+      if (parts.every(p => /^[01]{8}$/.test(p))) {
+        return parts.map(b => String.fromCharCode(parseInt(b,2))).join('');
+      }
+    } catch {}
+    try {
+      const reverseMorse = Object.fromEntries(Object.entries(morseMap).map(([k,v]) => [v,k]));
+      if (/^[.\-\s]+$/.test(text.trim())) {
+        return text.trim().split(' ').map(m => reverseMorse[m] || '').join('');
+      }
+    } catch {}
+    try {
+      if (/^[a-zA-Z\s]+$/.test(text.trim())) {
+        return rot13(text.trim());
+      }
+    } catch {}
+    return null;
+  }
+
+  function base64(text) {
+    if(encodeMode) return btoa(text);
+    else {
+      try {
+        return atob(text);
+      } catch(e) {
+        throw new Error('Invalid Base64 input');
+      }
+    }
+  }
+
+  function rot13(text) {
+    return text.replace(/[a-zA-Z]/g, function (c) {
+      let base = c <= "Z" ? 65 : 97;
+      return String.fromCharCode((c.charCodeAt(0) - base + 13) % 26 + base);
+    });
+  }
+
+  function hex(text) {
+    if(encodeMode){
+      return [...text].map(c => c.charCodeAt(0).toString(16).padStart(2,'0')).join(' ');
+    } else {
+      try {
+        return text.split(' ').map(h => String.fromCharCode(parseInt(h,16))).join('');
+      } catch(e) {
+        throw new Error('Invalid Hex input');
+      }
+    }
+  }
+
+  function binary(text) {
+    if(encodeMode){
+      return [...text].map(c => c.charCodeAt(0).toString(2).padStart(8,'0')).join(' ');
+    } else {
+      try {
+        return text.split(' ').map(b => String.fromCharCode(parseInt(b,2))).join('');
+      } catch(e) {
+        throw new Error('Invalid Binary input');
+      }
+    }
+  }
+
+  function morse(text) {
+    if(encodeMode){
+      return text.toUpperCase().split('').map(c => morseMap[c] || ' ').join(' ');
+    } else {
+      const reverseMorse = Object.fromEntries(Object.entries(morseMap).map(([k,v]) => [v,k]));
+      try {
+        return text.split(' ').map(m => reverseMorse[m] || '').join('');
+      } catch(e) {
+        throw new Error('Invalid Morse code');
+      }
+    }
+  }
+
+  function updateResult() {
+    const input = inputEl.value.trim();
+    const method = cipherEl.value;
+    errorMessage.textContent = '';
+    if(input.length === 0){
+      resultEl.textContent = 'Result will appear here';
+      return;
+    }
+    if(input.length > 2000){
+      errorMessage.textContent = 'Input too long (max 2000 chars)';
+      resultEl.textContent = '';
+      return;
+    }
+    try {
+      if(encodeMode){
+        let out;
+        if(method === 'base64') out = base64(input);
+        else if(method === 'rot13') out = rot13(input);
+        else if(method === 'hex') out = hex(input);
+        else if(method === 'binary') out = binary(input);
+        else if(method === 'morse') out = morse(input);
+        else out = 'Unknown cipher';
+        resultEl.textContent = out;
+      } else {
+        let out;
+        try {
+          if(method === 'base64') out = base64(input);
+          else if(method === 'rot13') out = rot13(input);
+          else if(method === 'hex') out = hex(input);
+          else if(method === 'binary') out = binary(input);
+          else if(method === 'morse') out = morse(input);
+          else throw new Error('Unknown cipher');
+        } catch(e) {
+          let autod = tryDecodeAuto(input);
+          if(autod === null) throw e;
+          out = autod;
+        }
+        resultEl.textContent = out;
+      }
+    } catch(e) {
+      errorMessage.textContent = e.message;
+      resultEl.textContent = '';
+    }
+  }
+
+  inputEl.addEventListener('input', updateResult);
+  cipherEl.addEventListener('change', updateResult);
+
+  // initial call
+  updateResult();
+</script>
+
+<footer style="text-align:center; margin-top: 20px; color: #888;">
+  © 2025 by burgur120
+</footer>
+</body>
+</html>
